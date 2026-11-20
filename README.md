@@ -34,9 +34,10 @@ flowchart LR
 
     subgraph report ["Report"]
         direction TB
+        warehouse[("<b>sql/</b> → DuckDB<br/>warehouse.duckdb")]
         export["<b>export_powerbi.py</b><br/>star-schema tables"]
         build["<b>build_powerbi_dashboard.py</b><br/>Power BI data pack"]
-        export --> build
+        warehouse --> export --> build
     end
 
     pbi[["Power BI report"]]
@@ -46,7 +47,7 @@ flowchart LR
     trips --> analysis
     closures --> analysis
     trips --> model
-    analysis --> export
+    analysis --> warehouse
     build --> pbi
 ```
 
@@ -55,7 +56,16 @@ flowchart LR
 3. **Clean the closures.** [`construction_closures.ipynb`](notebooks/preprocess/construction_closures.ipynb) filters the DOT closure records to 2025 onwards and assigns each closure to a TLC taxi zone. It uses a spatial join on the closure geometry, with Census geocoding as a fallback for records that have no geometry (`data/processed/construction_closures.csv`).
 4. **Analyse.** [`analysis.ipynb`](notebooks/analysis/analysis.ipynb) uses PySpark and GeoPandas to map demand and closures, compare demand at each number of concurrent closures within a like-for-like cohort, build hourly profiles, measure each zone's change against its own baseline, and estimate revenue impact.
 5. **Model.** [`pandas.ipynb`](notebooks/models/pandas.ipynb) uses scikit-learn to predict average trip duration with linear regression and a random forest on a log-transformed target, using a time-based train/test split, and extracts the construction-closure coefficient.
-6. **Report.** [`export_powerbi.py`](scripts/export_powerbi.py) exports the analysis as a star schema (fact and dimension tables) to `data/powerbi/`. [`build_powerbi_dashboard.py`](scripts/build_powerbi_dashboard.py) turns those tables into the Power BI data pack and the theme. Colours, fonts, page layout and on-canvas text all live in [`powerbi_style.py`](scripts/powerbi_style.py).
+6. **SQL warehouse.** The report numbers are computed in SQL. [`build_warehouse.py`](scripts/build_warehouse.py) runs the DuckDB SQL in [`sql/`](sql/) directly over the processed Parquet and CSV files, layer by layer:
+   - `staging/` types and cleans each source and adds the closure bucket and revenue.
+   - `intermediate/` builds the like-for-like cohort (zones seen at 0, 1 and 2 closures) and the snapshot dates.
+   - `marts/` produces every reporting table. Each zone's change against its own 0-closure baseline is a window function, the marginal effect per closure is `regr_slope`, and active closures per month are a range join.
+
+   The result is a single file, `data/warehouse.duckdb`, that you can also query directly:
+   ```bash
+   duckdb data/warehouse.duckdb -c "SELECT * FROM skew_comparison"
+   ```
+7. **Report.** [`export_powerbi.py`](scripts/export_powerbi.py) builds the warehouse, adds zone geometry with GeoPandas, and exports the star schema (fact and dimension tables) to `data/powerbi/`. [`compare_exports.py`](scripts/compare_exports.py) checks two exports table by table, so a change to the SQL can be verified against a previous output. [`build_powerbi_dashboard.py`](scripts/build_powerbi_dashboard.py) turns those tables into the Power BI data pack and the theme. Colours, fonts, page layout and on-canvas text all live in [`powerbi_style.py`](scripts/powerbi_style.py).
 
 ## Repository structure
 
@@ -78,8 +88,14 @@ flowchart LR
 │   │   └── analysis.ipynb               # main analysis, maps and charts
 │   └── models/
 │       └── pandas.ipynb                 # linear regression vs random forest
+├── sql/                                 # DuckDB SQL for every reporting table
+│   ├── staging/                         #   stg_demand, stg_closures, stg_zone_lookup
+│   ├── intermediate/                    #   like-for-like cohort, snapshot dates
+│   └── marts/                           #   facts, dimensions, aggregates, KPIs
 ├── scripts/
-│   ├── export_powerbi.py                # processed data → star-schema tables (data/powerbi/)
+│   ├── build_warehouse.py               # runs sql/ → data/warehouse.duckdb
+│   ├── export_powerbi.py                # warehouse + zone geometry → star-schema tables (data/powerbi/)
+│   ├── compare_exports.py               # checks two exports of data/powerbi/ match
 │   ├── build_powerbi_dashboard.py       # star schema → Power BI pack (data/powerbi_dashboard/)
 │   └── powerbi_style.py                 # shared palette, fonts, page layout and report copy
 └── data/
@@ -87,6 +103,7 @@ flowchart LR
     ├── taxi_zones/                      # TLC taxi zone shapefile (.shp/.dbf/.shx/...) + taxi+_zone_lookup.csv
     ├── raw/tlc_data/                    # yellow/, green/, high_volume/ monthly trip files (YYYY-MM.parquet)
     ├── processed/                       # pu_agg.parquet, pu_agg.csv, construction_closures.csv
+    ├── warehouse.duckdb                 # DuckDB warehouse built from sql/ (generated)
     ├── powerbi/                         # star-schema tables, fact_demand.parquet, taxi_zones.geojson (generated)
     └── powerbi_dashboard/               # Power BI data pack (generated):
         ├── 01_kpi_cards.csv             #   page 1 KPI cards
@@ -115,11 +132,12 @@ pip install -r requirements.txt
 1. Run `notebooks/collect_data.ipynb`. It downloads the trip data to `data/raw/tlc_data/`. Download the [Street Closures due to Construction Activities](https://data.cityofnewyork.us/Transportation/Street-Closures-due-to-Construction-Activities-by-/i6b5-j7bu/about_data) dataset from NYC Open Data and save it as `data/street_closures_construction.csv`.
 2. Run the two notebooks in `notebooks/preprocess/`. They write to `data/processed/`.
 3. Run `notebooks/analysis/analysis.ipynb` and `notebooks/models/pandas.ipynb`.
-4. Build the Power BI pack:
+4. Build the Power BI pack. The first command builds the DuckDB warehouse from `sql/` and exports the star schema:
    ```bash
    python scripts/export_powerbi.py
    python scripts/build_powerbi_dashboard.py
    ```
+   To rebuild only the warehouse (for example, to query it while editing the SQL), run `python scripts/build_warehouse.py`.
 5. Open `report/NYC taxi closures.pbix` in Power BI Desktop. To refresh it with your own build, set the `DataFolder` parameter (Transform data → Edit parameters) to the full path of your `data/powerbi_dashboard/` folder, ending in a backslash. To build the report from scratch instead, load the CSVs in `data/powerbi_dashboard/` and apply `investor_theme.json`.
 
 ## Data sources
