@@ -1,0 +1,24 @@
+# Python 3.11; PySpark also needs Java 8 or later
+
+# Data processing
+pyspark>=4.2.0
+pandas>=3.0.5
+numpy>=2.4.6
+pyarrow>=25.0.0
+
+# Geospatial
+geopandas>=1.1.4
+shapely>=2.1.2
+pyogrio>=0.13.0
+geopy>=2.5.0
+
+# Modelling and charts
+scikit-learn>=1.9.0
+matplotlib>=3.11.1
+
+# Utilities
+requests>=2.34.2
+tqdm>=4.70.0
+
+# Running the notebooks
+ipykernel>=7.3.0
