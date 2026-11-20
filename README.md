@@ -18,13 +18,36 @@ This project joins **395 million NYC taxi and rideshare trips** (January 2025 to
 
 ## Pipeline
 
-```
-NYC TLC trip records ─┐
-(yellow, green, HVFHV)│   taxi_preprocess.ipynb          analysis.ipynb             export_powerbi.py          build_powerbi_dashboard.py
-                      ├─► clean, join, aggregate  ─►  cohort analysis, maps  ─►  star-schema tables   ─►   Power BI data pack
-NYC DOT construction  │   to zone × hour × service       revenue estimates       (data/powerbi/)           (data/powerbi_dashboard/)
-street closures ──────┘   construction_closures.ipynb
-                          map closures to taxi zones
+```mermaid
+flowchart LR
+    tlc[("NYC TLC trips<br/>yellow · green · HVFHV")]
+    dot[("NYC DOT<br/>construction closures")]
+
+    subgraph prep ["Clean"]
+        direction TB
+        trips["<b>taxi_preprocess.ipynb</b><br/>aggregate to<br/>zone × hour × service"]
+        closures["<b>construction_closures.ipynb</b><br/>map closures<br/>to taxi zones"]
+    end
+
+    analysis["<b>analysis.ipynb</b><br/>cohort analysis, maps,<br/>revenue estimates"]
+    model["<b>pandas.ipynb</b><br/>duration models"]
+
+    subgraph report ["Report"]
+        direction TB
+        export["<b>export_powerbi.py</b><br/>star-schema tables"]
+        build["<b>build_powerbi_dashboard.py</b><br/>Power BI data pack"]
+        export --> build
+    end
+
+    pbi[["Power BI report"]]
+
+    tlc -- collect_data.ipynb --> trips
+    dot --> closures
+    trips --> analysis
+    closures --> analysis
+    trips --> model
+    analysis --> export
+    build --> pbi
 ```
 
 1. **Collect.** [`collect_data.ipynb`](notebooks/collect_data.ipynb) downloads monthly TLC trip files for yellow taxis, green taxis and high-volume rideshare (Uber/Lyft) for January 2025 to May 2026. It is adapted from a [MAST30034 template by Oliver Tan](https://github.com/MAST30034-Applied-Data-Science/mast30034-project-1-olivertan1999).
